@@ -29,24 +29,26 @@ public:
 
     void unprojectDepth(Mat &depth, Mat &rgb, PointCloud<PointXYZRGB>::Ptr cloud){
 
-//        #pragma omp parallel for
+        //        #pragma omp parallel for
         for (int r = 0; r < depth.rows; ++r) {
             ushort* pixelDepth = depth.ptr<ushort>(r);
             Vec3b* pixelRGB = rgb.ptr<Vec3b>(r);
             for (int c = 0; c < depth.cols; ++c) {
                 double dep = pixelDepth[c];
-                double red = pixelRGB[c][2];
-                double gre = pixelRGB[c][1];
-                double blu = pixelRGB[c][0];
+                if(dep > 0){
+                    double red = pixelRGB[c][2];
+                    double gre = pixelRGB[c][1];
+                    double blu = pixelRGB[c][0];
 
-                PointXYZRGB point3D;
-                point3D.z = dep/5000.f;
-                point3D.x = (c - centerX) * point3D.z * 1.f/fx;
-                point3D.y = (r - centerY) * point3D.z * 1.f/fy;
-                point3D.r = red;
-                point3D.g = gre;
-                point3D.b = blu;
-                cloud->points.push_back(point3D);
+                    PointXYZRGB point3D;
+                    point3D.z = dep/5000.f;
+                    point3D.x = (c - centerX) * point3D.z * 1.f/fx;
+                    point3D.y = (r - centerY) * point3D.z * 1.f/fy;
+                    point3D.r = red;
+                    point3D.g = gre;
+                    point3D.b = blu;
+                    cloud->points.push_back(point3D);
+                }
             }
         }
     }

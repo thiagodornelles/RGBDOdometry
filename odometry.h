@@ -18,10 +18,10 @@ public:
     VectorXd poseVector6D;
     Projector projector;
 
-    Mat referenceIntensityImage;
-    Mat referenceDepthImage;
-    Mat actualIntensityImage;
-    Mat actualDepthImage;
+    Mat sourceIntensityImage;
+    Mat sourceDepthImage;
+    Mat targetIntensityImage;
+    Mat targetDepthImage;
 
     Odometry(Projector projector){
         poseVector6D.setZero(6);
@@ -32,28 +32,28 @@ public:
         return poseVector6D;
     }
 
-    void setReferenceRGBImages(Mat referenceIntensityImage, Mat referenceDepthImage){
-        this->referenceIntensityImage = referenceIntensityImage;
-        this->referenceDepthImage = referenceDepthImage;
+    void setsourceRGBImages(Mat sourceIntensityImage, Mat sourceDepthImage){
+        this->sourceIntensityImage = sourceIntensityImage;
+        this->sourceDepthImage = sourceDepthImage;
     }
 
-    void setReferenceDepthImages(Mat actualIntensityImage, Mat actualDepthImage){
-        this->actualIntensityImage = actualIntensityImage;
-        this->actualDepthImage = actualDepthImage;
+    void setsourceDepthImages(Mat targetIntensityImage, Mat targetDepthImage){
+        this->targetIntensityImage = targetIntensityImage;
+        this->targetDepthImage = targetDepthImage;
     }
 
     void setInitialPoseVector(VectorXd poseVector6D){
         this->poseVector6D = poseVector6D;
     }
 
-    void computeResidualsAndJacobians(Mat &referenceIntensityImage, Mat &referenceDepthImage,
-                                      Mat &actualIntensityImage,
+    void computeResidualsAndJacobians(Mat &sourceIntensityImage, Mat &sourceDepthImage,
+                                      Mat &targetIntensityImage,
                                       MatrixXd &residuals, MatrixXd &jacobians){
 
-        Mat actualDerivativeX, actualDerivativeY;
+        Mat targetDerivativeX, targetDerivativeY;
 
-        Scharr(actualIntensityImage, actualDerivativeX, CV_64F, 1, 0, 0.00005, 0.0, cv::BORDER_DEFAULT);
-        Scharr(actualIntensityImage, actualDerivativeY, CV_64F, 0, 1, 0.00005, 0.0, cv::BORDER_DEFAULT);
+        Scharr(targetIntensityImage, targetDerivativeX, CV_64F, 1, 0, 0.00005, 0.0, cv::BORDER_DEFAULT);
+        Scharr(targetIntensityImage, targetDerivativeY, CV_64F, 0, 1, 0.00005, 0.0, cv::BORDER_DEFAULT);
 
         double x = poseVector6D(0);
         double y = poseVector6D(1);
@@ -121,16 +121,18 @@ public:
         double centerX = projector.centerX;
         double centerY = projector.centerY;
 
-        int nRows = referenceDepthImage.rows;
-        int nCols = referenceDepthImage.cols;
+        int nRows = sourceDepthImage.rows;
+        int nCols = sourceDepthImage.cols;
 
 //        #pragma omp parallel for
         for (int r = 0; r < nRows; ++r) {
             for (int c = 0; c < nCols; ++c) {
 
-                //Unprojection of DepthMap
+                //******* BEGIN Unprojection of DepthMap ********//
                 Vector4d point3D;
-                point3D(2) = *referenceDepthImage.ptr<ushort>(r, c)/5000.f;
+                point3D(2) = *sourceDepthImage.ptr<ushort>(r, c)/5000.f;
+                if(point3D(2) == 0)
+                    continue;
                 point3D(0) = (c - centerX) * point3D(2) * 1/fx;
                 point3D(1) = (r - centerY) * point3D(2) * 1/fy;
                 point3D(3) = 1.0;
@@ -138,24 +140,27 @@ public:
                 double px = point3D(0);
                 double py = point3D(1);
                 double pz = point3D(2);
+                //******* END Unprojection of DepthMap ********//
 
-                //Transform generated 3D point to new position
+                //******* BEGIN Transformation of PointCloud ********//
                 Vector4d transfPoint3D = Rt * point3D;
+                //******* END Transformation of PointCloud ********//
 
-                //Projection of 3d points to the image plane (2D)
+                //******* BEGIN Projection of PointCloud on the image plane ********//
                 double invTransfZ = 1.0/transfPoint3D(2);
                 double transfC = (transfPoint3D(0) * fx) * invTransfZ + centerX;
                 double transfR = (transfPoint3D(1) * fy) * invTransfZ + centerY;
                 int transfR_int = static_cast<int>(round( transfR ));
                 int transfC_int = static_cast<int>(round( transfC ));
+                //******* END Projection of PointCloud on the image plane ********//
 
-                //Checks if each pixel projects inside reference image
+                //******* BEGIN Residual and Jacobians computation ********//
+                //Checks if this pixel projects inside of the source image
                 if((transfR_int >= 0 && transfR_int < nRows) &
                    (transfC_int >= 0 && transfC_int < nCols)) {
 
-                    double pixel1 = *referenceIntensityImage.ptr<uchar>(r, c)/255.f;
-                    double pixel2 = *actualIntensityImage.ptr<uchar>(transfR_int, transfC_int)/255.f;
-
+                    double pixel1 = *sourceIntensityImage.ptr<uchar>(r, c)/255.f;
+                    double pixel2 = *targetIntensityImage.ptr<uchar>(transfR_int, transfC_int)/255.f;
 
                     //Compute the per pixel jacobian
                     MatrixXd jacobianPrRt(2,6);
@@ -191,11 +196,11 @@ public:
                                         -fy*(py*temp22-pz*temp23)*(py*temp6+pz*temp9+px*temp14+y)*temp26;
 
                     //Apply the chain rule to compound the image gradients with the projective+RigidTransform jacobians
-                    MatrixXd actualGradient(1,2);
+                    MatrixXd targetGradient(1,2);
                     uint i = nCols * r + c;
-                    actualGradient(0) = *actualDerivativeX.ptr<double>(r,c);
-                    actualGradient(1) = *actualDerivativeY.ptr<double>(r,c);
-                    MatrixXd jacobian = actualGradient * jacobianPrRt;
+                    targetGradient(0) = *targetDerivativeX.ptr<double>(r,c);
+                    targetGradient(1) = *targetDerivativeY.ptr<double>(r,c);
+                    MatrixXd jacobian = targetGradient * jacobianPrRt;
 
                     //Assign the pixel residual and jacobian to its corresponding row
                     jacobians(i,0) = jacobian(0,0);
@@ -204,8 +209,10 @@ public:
                     jacobians(i,3) = jacobian(0,3);
                     jacobians(i,4) = jacobian(0,4);
                     jacobians(i,5) = jacobian(0,5);
+                    //Residual of the pixel
                     residuals(nCols * transfR_int + transfC_int, 0) = pixel2 - pixel1;
                 }
+                //******* END Residual and Jacobians computation ********//
             }
         }
     }
@@ -250,6 +257,7 @@ public:
 
         MatrixXd gradients = jacobians.transpose() * residuals;
         poseVector6D = poseVector6D - ((jacobians.transpose()*jacobians).inverse() * gradients);
+        cerr << gradients.norm() << endl;
     }
 };
 #endif

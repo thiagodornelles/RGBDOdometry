@@ -1,3 +1,0 @@
-/home/thiago/qt_projects/RGBD-Reconstruction/build/CMakeFiles/edit_cache.dir
-/home/thiago/qt_projects/RGBD-Reconstruction/build/CMakeFiles/rebuild_cache.dir
-/home/thiago/qt_projects/RGBD-Reconstruction/build/CMakeFiles/RGBD-Reconstruction.dir
